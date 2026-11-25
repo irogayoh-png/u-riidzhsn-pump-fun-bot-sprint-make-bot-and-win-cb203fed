@@ -17,6 +17,17 @@
 //  - v9 makes the TIGHT TRAILING stop the main winner exit (arm +10%,
 //    drop 5%) with TP +60% only as a backstop: coins peaking +10-25% used
 //    to fall all the way to the -4% stop; now they bank +5-20% instead.
+//    (v9 scored -0.62, worse than v7: the tight trail cut winners short.)
+//  - v10 (this version) keeps v7's exits but narrows entry to
+//    SUPER-EXPLOSIVE coins only: >=3.00x within the first 10 trades
+//    (38 such coins in the dev window). Stress on v7 was damning (median
+//    -0.34, 20/20 copies lost), so only a much more selective entry can
+//    flip the sign.
+//  - v10d: v10 scored -0.043 on 14 coins (guardrail needs 20) — the other
+//    24 eligible coins were missed because their spike printed mid-batch
+//    and retraced before the batch-end decision. This version records the
+//    spike from any trade event and enters on the post-spike dip
+//    (current price 1.50-5.00x) within 40 trades.
 //  - All price comparisons use BigInt cross-multiplication (no floats, no
 //    randomness, no wall clock) so two runs produce identical action logs.
 
@@ -25,9 +36,12 @@ import { LAMPORTS_PER_SOL, runBot, type BuyInput, type SellInput } from './vendo
 const STAKE_LAMPORTS = LAMPORTS_PER_SOL / 20n; // 0.05 SOL per coin
 const MIN_CAP_LAMPORTS = LAMPORTS_PER_SOL / 20n; // 0.05 SOL -> real reserve >= 5 SOL (thick curves only: thin curves gap -9% between batches)
 const MIN_TRADES = 1;
-const MAX_ENTRY_TRADES = 10; // only coins still in their first 10 trades
-const MIN_ENTRY_MULT_BPS = 18_000; // price >= 1.80x first-seen price: exploding only
-const MAX_ENTRY_MULT_BPS = 50_000; // never chase above 5.00x first-seen price
+const MAX_ENTRY_TRADES = 20; // spike must happen within the first 20 trades
+const MIN_ENTRY_MULT_BPS = 30_000; // spike threshold: price >= 3.00x first-seen price
+const MAX_ENTRY_MULT_BPS = 100_000; // never chase above 10.00x first-seen price
+const CUR_MIN_MULT_BPS = 25_000; // current price >= 2.50x (spike must still be holding)
+const CUR_MAX_MULT_BPS = 50_000; // current price <= 5.00x
+const ENTRY_TRADES_MAX = 40; // enter within 40 trades of creation (spike + follow-through)
 const SLIPPAGE_BPS = 10_000;
 
 const TP_BPS = 2_500; // +25% take profit (full exit)
@@ -44,6 +58,8 @@ interface CoinTrack {
   firstT: bigint; // virtual token reserves at first sight
   trades: number;
   decided: boolean; // entry already taken or dropped for good
+  spikeSeen: boolean; // price hit >=3x in some trade (even mid-batch)
+  spikeTrades: number; // trade count when the spike first happened
 }
 
 interface Entry {
@@ -110,6 +126,8 @@ await runBot({
             firstT: BigInt(e.virtual_token_reserves),
             trades: 0,
             decided: false,
+            spikeSeen: false,
+            spikeTrades: 0,
           });
         }
       } else if (e.event === 'TradeEvent') {
@@ -120,10 +138,23 @@ await runBot({
             firstT: BigInt(e.virtual_token_reserves),
             trades: 0,
             decided: false,
+            spikeSeen: false,
+            spikeTrades: 0,
           };
           coins.set(e.mint, t);
         }
         t.trades += 1;
+        // Intra-batch spike: a trade that prints >=3x counts even if the
+        // batch-end price retraces below 3x before the bot decides.
+        if (!t.spikeSeen && t.trades <= MAX_ENTRY_TRADES) {
+          const m = priceMultBps(
+            BigInt(e.virtual_sol_reserves), BigInt(e.virtual_token_reserves), t.firstQ, t.firstT,
+          );
+          if (m >= MIN_ENTRY_MULT_BPS) {
+            t.spikeSeen = true;
+            t.spikeTrades = t.trades;
+          }
+        }
       } else if (e.event === 'CompleteEvent') {
         const t = coins.get(e.mint);
         if (t) t.decided = true;
@@ -197,8 +228,12 @@ await runBot({
       );
       if (mult > MAX_ENTRY_MULT_BPS) { t.decided = true; continue; } // too late, never chase
       if (t.trades < MIN_TRADES) continue;
-      if (t.trades > MAX_ENTRY_TRADES) { t.decided = true; continue; } // explosion window passed
-      if (mult < MIN_ENTRY_MULT_BPS) continue;
+      if (!t.spikeSeen) {
+        if (t.trades > MAX_ENTRY_TRADES) t.decided = true; // spike window passed
+        continue;
+      }
+      if (t.trades > ENTRY_TRADES_MAX) { t.decided = true; continue; } // entry window passed
+      if (mult < CUR_MIN_MULT_BPS || mult > CUR_MAX_MULT_BPS) continue; // buy the post-spike dip, not a dead coin or a moonshot already gone
       const cap = state.maxBuyLamports(mint);
       if (cap < MIN_CAP_LAMPORTS) continue;
       const amount = cap < STAKE_LAMPORTS ? cap : STAKE_LAMPORTS;
