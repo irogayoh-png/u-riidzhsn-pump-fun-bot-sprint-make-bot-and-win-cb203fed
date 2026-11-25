@@ -10,7 +10,7 @@ A paper-trading bot for the [Pump.fun Bot Sprint](https://make.fun/bounty/u-riid
 
 Explosive-entry swing trading, tuned on the dev window (1,222 coins, 24h):
 
-- **Entry:** a coin that explodes to **>=1.80x** its creation price within its first **10 trades**, once its real SOL reserve reaches **5 SOL** (thick curves only — thin curves gap between batches). One buy per coin, up to **0.05 SOL**, at most 5 open positions.
+- **Entry:** a coin whose price prints **>=3.00x** its creation price in some trade within its first **20 trades** (the spike is read from the trade events themselves, so a spike that prints mid-batch and retraces before the batch ends still counts), while its current price is still **>=2.50x** and its real SOL reserve is **>=5 SOL**. One buy per coin, up to **0.05 SOL**, at most 5 open positions.
 - **Exit:** take-profit **+25%**, stop-loss **-4%**, trailing stop (arms at +10%, sells 12% below the peak), plus a batch-count stale exit so a dead coin cannot block a slot forever.
 - **Safety:** sells are sized to what the curve's real reserves can absorb, so a dead coin never spams rejected orders. All price math uses integer cross-multiplication — no floats, no randomness, no wall clock — so two runs produce identical action logs.
 
@@ -18,9 +18,9 @@ Explosive-entry swing trading, tuned on the dev window (1,222 coins, 24h):
 
 | version | net PnL | coins | win rate | max drawdown |
 | --- | --- | --- | --- | --- |
-| v7 (this entry) | -0.41 SOL | 161 | 26% | 4.6% |
+| v10d (this entry) | -0.07 SOL | 32 | 41% | 1.1% |
 
-Earlier variants (momentum entry, early entry, fast exits, partial take-profit, late entry on proven-active coins, tight trailing) all scored worse on the same dev window, as did every house pilot shipped in the kit (best pilot: sniper, -0.47 SOL). The dev window is a hard, mean-reverting sample; this entry is the least-bad and most robust of the family tested.
+Earlier variants all scored worse on the same dev window: broad early entry -0.47, momentum -1.04, fast exits -0.63, partial take-profit -1.53, late entry on proven-active coins -1.20, tight trailing -0.62, super-explosive 3x in 10 trades -0.04 but only 14 coins (guardrail needs 20). Every house pilot shipped in the kit also lost (best pilot: sniper, -0.47 SOL). The dev window is a hard, mean-reverting sample; this entry is the closest to breakeven of the family tested.
 
 ## Layout
 
